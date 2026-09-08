@@ -1,6 +1,7 @@
 package testing;
 
 import adjudication.Judge;
+import adjudication.Referee;
 import adjudication.SzykmanReferee;
 import domain.Order;
 import util.Orders;
