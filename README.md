@@ -2,7 +2,7 @@
 
 A DATC-compliant* Diplomacy adjudicator, written in base Java.
 
-At present, the program reads DATC test cases from disk, and compares them to  the adjudicator's results. 
+At present, the program (i.e. its only entry point) reads DATC test cases from disk, and compares them to  the adjudicator's results. 
 
 These test cases include:
 * Handling illegal orders
@@ -27,9 +27,9 @@ These test cases include:
 
 ## Tests
 
-Run `TestCaseManager`
+Run `TestCaseManager`.
 
-The test cases are read from `src/testgames/*` and `/src/testgames_solutions/*`
+The test cases are read from `src/resources/testgames/*` and `/src/resources/testgames_solutions/*`
 
 The program prints each test result and gives a final DATC-compliance score.
 
