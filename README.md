@@ -2,7 +2,7 @@
 
 A DATC-compliant* Diplomacy adjudicator, written in base Java.
 
-At present, the program reads DATC test cases from disk, and compares them to  the adjudicator's results. 
+At present, the program reads <a href="https://petermc.net/diplomacy/datc_v3_3.html">DATC test cases</a> from disk, and compares them to  the adjudicator's results. 
 
 These test cases include:
 * Handling illegal orders
