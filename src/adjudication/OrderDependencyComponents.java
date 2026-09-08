@@ -33,7 +33,7 @@ public abstract class OrderDependencyComponents {
 
     /**
      * Returns conservative dependency components in the input collection's
-     * iteration order.
+     * iteration order.<br><br>
      *
      * Order identity, rather than Order.equals(...), is used for graph
      * membership because adjudication metadata is mutable.

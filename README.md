@@ -2,7 +2,7 @@
 
 A DATC-compliant* Diplomacy adjudicator, written in base Java.
 
-At present, the program (i.e. its only entry point) reads DATC test cases from disk, and compares them to  the adjudicator's results. 
+At present, the program (i.e. its only entry point) reads [DATC test cases](https://petermc.net/diplomacy/datc_v3_3.html) from disk, and compares them to  the adjudicator's results. 
 
 These test cases include:
 * Handling illegal orders
@@ -10,9 +10,10 @@ These test cases include:
 * Basic movement - i.e. 'moves, holds, supports, & convoys'
 * Advanced tactics - e.g. cyclical movement, head-to-head battles, beleaguered garrisons, convoy swaps, etc.
 * "Simple" convoy paradoxes
-* Multi-layer convoy paradoxes
+* Multi-layer "complex" convoy paradoxes
+* Butterfly effect & "broken" paradoxes
 
-\*Several DATC cases are incompatible with the program - see: *Limitations and Idiosyncrasies* below, and `misc/testcase_alterations`.
+\*Several DATC cases are incompatible / changed with the program - see: *Limitations and Idiosyncrasies* below, and `misc/testcase_alterations`.
 
 ---
 
@@ -21,6 +22,7 @@ These test cases include:
 - `Judge.java` — resolves a set of orders
 - `Referee.java` (extends Judge) — runs multiple shuffled adjudications and selects a final result when raw results differ
 - `SzykmanReferee.java` (extends Referee) - special Referee used for convoy paradoxes
+- `OrdinaryResolutionProbe.java` - performs "ordinal adjudication" (based on assumptions alone) to aid in paradox decisions
 - `TestCaseManager.java` — loads and runs DATC test cases
 
 ---
@@ -46,12 +48,3 @@ Some adjudicators (like <a href="https://www.backstabbr.com/">Backstabbr</a>) al
 2. *Referee* does not natively support a `via convoy` flag.
 
 The existence of a convoy operation is an implied result of the convoying fleet 'succeeding', the move succeeding, and the move itself existing.
-
-3. `6.F.29. TEST CASE, SIXTH ORDER BUTTERFLY EFFECT` is not yet resolved correctly.
-
-The program detects the layer-6 convoy dependency as a paradox and applies Szykman-style convoy handling. However, F29 has one valid normal resolution, so that fallback should not be used.
-i.e. *Referee* triggers the Szykman rule here, while DATC does not.
-
-This defect is limited in scope to situations where convoy paradoxes exist within the provided orders, which is in itself an exceptionally rare occurrence.
-
----

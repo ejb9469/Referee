@@ -25,7 +25,12 @@ public class Referee extends Judge {
 
     // Constants \\
 
-    public static final int NUM_TRIALS_DEFAULT = 300;
+    /*
+     * 3,000 shuffled trials are required for deterministic candidate coverage in
+     * the DATC sixth-order paradox and butterfly-effect cases (6.F.28.P/F.29).
+     */
+    public static final int NUM_TRIALS_DEFAULT = 3_000;  // up from 300  [ @ 10-08-26 ]
+    // TODO: This should be programmatically determined from `orders.size()`
 
     /*
      * A fixed default makes a test run reproducible. Supply a different seed

@@ -68,8 +68,7 @@ public class SzykmanReferee extends Referee {
     }
 
     /**
-     * Creates a SzykmanReferee with a known seed, allowing reproducible trial
-     * ordering during paradox investigation.
+     * Creates a SzykmanReferee with a known seed, allowing reproducible trial ordering.
      *
      * @param orders orders to adjudicate
      * @param numTrials number of shuffled orderings to examine
@@ -98,35 +97,111 @@ public class SzykmanReferee extends Referee {
     protected Collection<Order> selectFinalResolution() {
 
         /*
-         * Referee.judge() restores this.orders to the submitted order set before
+         * `Referee.judge()` restores `this.orders` to the submitted order set before
          * calling this hook. Preserve that state before the inherited selector
-         * potentially performs its legacy tie-handling re-adjudication.
+         * potentially performs its tie-handling re-adjudication.
          */
         Collection<Order> submittedOrders = new ArrayList<>(
-                Orders.deepCopy(this.orders)
-        );
+                Orders.deepCopy(this.orders));
 
-        Collection<Order> baseResolution =
-                super.selectFinalResolution();
-
-        if (baseResolution == null)
-            return null;
-
+        /*
+         * Most positions are not multi-convoy paradox candidates. Avoid running
+         * the ordinary-resolution probe unless raw Referee candidates disagree
+         * about at least two convoy orders, which is the existing trigger for
+         * the broad simultaneous-HOLD Szykman policy.
+         */
         Map<String, Order> conflictingConvoys =
                 this.findConflictingConvoys(this.resolutions.values());
 
-        if (conflictingConvoys.size() >= 2) {
-            return this.adjudicateWithConflictingConvoysHeld(
-                    submittedOrders,
-                    conflictingConvoys
-            );
+        if (conflictingConvoys.size() < 2) {
+
+            Collection<Order> baseResolution =
+                    super.selectFinalResolution();
+
+            if (baseResolution == null)
+                return null;
+
+            Set<Order> selectedResolution = new LinkedHashSet<>(
+                    Orders.deepCopy(baseResolution));
+
+            return this.applySingleConvoyParadoxRule(selectedResolution);
+
         }
 
-        Set<Order> selectedResolution = new LinkedHashSet<>(
-                Orders.deepCopy(baseResolution)
-        );
+        /*
+         * Multiple conflicting convoy outcomes can be either a genuine convoy
+         * paradox or an apparent recursive cycle with a complete ordinary
+         * resolution. For example, 6.F.29 has multiple raw convoy conflicts,
+         * but 'Por S MAO H' supplies a decisive non-circular strength
+         * constraint and the ordinary position resolves completely.
+         */
+        OrdinaryResolutionProbeResult ordinaryResolution =
+                new OrdinaryResolutionProbe(
+                        submittedOrders
+                ).probe();
 
-        return this.applySingleConvoyParadoxRule(selectedResolution);
+        /*
+         * A complete probe means ordinary adjudication determines every submitted
+         * order without speculative cycle-breaking. Select the matching raw
+         * `Referee` candidate directly, before `Referee`'s inherited selection logic
+         * can produce a multi-convoy fallback result.
+         */
+        if (ordinaryResolution.isComplete()) {
+
+            Collection<Order> ordinaryCandidate =
+                    this.findProbeMatchingCandidate(
+                            ordinaryResolution);
+
+            if (ordinaryCandidate != null) {
+                return new LinkedHashSet<>(
+                        Orders.deepCopy(ordinaryCandidate));
+            }
+
+        }
+
+        return this.adjudicateWithConflictingConvoysHeld(
+                submittedOrders,
+                conflictingConvoys);
+
+    }
+
+    /**
+     * Returns the raw Referee candidate whose verdicts match the complete
+     * non-speculative ordinary-resolution probe.<br><br>
+     *
+     * Referee's inherited selection may synthesize a fallback result for a
+     * multi-convoy ambiguity, so use the original raw candidate here.
+     */
+    private Collection<Order> findProbeMatchingCandidate(
+            OrdinaryResolutionProbeResult probe
+    ) {
+
+        for (Set<Order> candidate : this.resolutions.values()) {
+
+            boolean matches = true;
+
+            for (Order candidateOrder : candidate) {
+
+                Order submittedOrder =
+                        originalOrderOf(candidateOrder);
+
+                ResolutionState state =
+                        probe.stateOf(submittedOrder);
+
+                if (!state.isKnown()
+                        || state.isSuccessful()
+                        != candidateOrder.verdict) {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if (matches)
+                return candidate;
+
+        }
+
+        return null;
 
     }
 
@@ -147,8 +222,7 @@ public class SzykmanReferee extends Referee {
     ) {
 
         List<Order> transformedOrders = new ArrayList<>(
-                Orders.deepCopy(submittedOrders)
-        );
+                Orders.deepCopy(submittedOrders));
 
         for (Order order : transformedOrders) {
 
@@ -164,14 +238,14 @@ public class SzykmanReferee extends Referee {
             order.orderType = OrderType.HOLD;
             order.pos1 = null;
             order.pos2 = null;
+
         }
 
         Judge judge = new Judge(transformedOrders);
         judge.judge();
 
         return new LinkedHashSet<>(
-                Orders.deepCopy(judge.getOrders())
-        );
+                Orders.deepCopy(judge.getOrders()));
 
     }
 
@@ -203,9 +277,7 @@ public class SzykmanReferee extends Referee {
                 conflictingConvoys.values().iterator().next();
 
         Order selectedConvoy = findMatchingOriginalOrder(
-                conflictingConvoy,
-                selectedResolution
-        );
+                conflictingConvoy, selectedResolution);
 
         if (selectedConvoy == null
                 || selectedConvoy.verdict) {
@@ -213,9 +285,7 @@ public class SzykmanReferee extends Referee {
         }
 
         Order correspondingMove = Orders.locateCorresponding(
-                conflictingConvoy,
-                selectedResolution
-        );
+                conflictingConvoy, selectedResolution);
 
         if (correspondingMove == null
                 || correspondingMove.verdict) {
@@ -223,8 +293,7 @@ public class SzykmanReferee extends Referee {
         }
 
         Set<Order> adjustedResolution = new LinkedHashSet<>(
-                Orders.deepCopy(selectedResolution)
-        );
+                Orders.deepCopy(selectedResolution));
 
         for (Order order : adjustedResolution) {
 
@@ -237,9 +306,7 @@ public class SzykmanReferee extends Referee {
             if (!Province.equalsIgnoreCoast(
                     order.pos1,
                     conflictingConvoy.pos0
-            )) {
-                continue;
-            }
+            )) { continue; }
 
             /*
              * The convoyed army is not attacking the convoy fleet's province
@@ -258,6 +325,7 @@ public class SzykmanReferee extends Referee {
 
             order.resolved = true;
             order.verdict = false;
+
         }
 
         return adjustedResolution;

@@ -1,8 +1,6 @@
 package _app;
 
-import adjudication.ParadoxCycle;
-import adjudication.Referee;
-import adjudication.SzykmanReferee;
+import adjudication.*;
 import domain.Order;
 import domain.OrderType;
 import domain.Province;
@@ -19,7 +17,7 @@ import java.util.*;
 
 /**
  * Owns a collection of adjudication test cases.
- * Provides runners for `Judge` and `Referee` evaluation.
+ * Provides runners for `Judge`, `Referee`, and `SzykmanReferee` evaluation.
  *
  * @author Evan B
  */
@@ -170,25 +168,9 @@ public class TestCaseManager {
 
             String name = testCase.getName();
 
-            if (name.contains("6.E.11")
-                    || name.contains("6.F.17.P")
-                    || name.contains("6.F.23.P")
-                    || name.contains("6.F.24.P")) {
-                diagnoseRefereeStability(
-                        testCase,
-                        50,
-                        Referee.NUM_TRIALS_DEFAULT
-                );
-            }
+            // PLACE DIAGNOSTIC FUNCTIONS HERE \\
 
-            if (name.contains("6.F.23.P")
-                    || name.contains("6.F.24.P")) {
-                diagnoseSecondOrderParadox(
-                        testCase,
-                        50,
-                        Referee.NUM_TRIALS_DEFAULT
-                );
-            }
+
 
         }
 
@@ -197,6 +179,9 @@ public class TestCaseManager {
     public void runRefereeTests() {
 
         System.out.println("REFEREE ONE-OFF TESTING:\n");
+
+        //if (USE_SZYKMAN_REFEREE)
+            //SzykmanReferee.resetProbeDiagnostics();
 
         List<TestCaseReferee> testCaseRefs = new ArrayList<>();
 
@@ -214,6 +199,9 @@ public class TestCaseManager {
         this.testCases.addAll(testCaseRefs);
 
         this.printTotals();
+
+        //if (USE_SZYKMAN_REFEREE)
+            //this.printProbeDiagnostics();
 
     }
 
@@ -350,6 +338,41 @@ public class TestCaseManager {
         System.out.println("----------------------------------------\n");
 
     }
+
+    /*private void printProbeDiagnostics() {
+
+        SzykmanReferee.ProbeDiagnostics diagnostics =
+                SzykmanReferee.getProbeDiagnostics();
+
+        System.out.println("SZYKMAN PROBE DIAGNOSTICS:\n");
+
+        System.out.printf(
+                "Final SzykmanReferee selections:\t\t\t%d%n",
+                diagnostics.finalResolutionSelections()
+        );
+        System.out.printf(
+                "Multi-convoy candidates (2+ conflicts):\t\t%d%n",
+                diagnostics.multiConvoyCandidates()
+        );
+        System.out.printf(
+                "OrdinaryResolutionProbe invocations:\t\t%d%n",
+                diagnostics.ordinaryResolutionProbeInvocations()
+        );
+        System.out.printf(
+                "Complete ordinary probes:\t\t\t%d%n",
+                diagnostics.completeOrdinaryResolutionProbes()
+        );
+        System.out.printf(
+                "Matching ordinary candidates selected:\t\t%d%n",
+                diagnostics.ordinaryCandidateSelections()
+        );
+        System.out.printf(
+                "Szykman simultaneous-HOLD fallbacks:\t\t%d%n",
+                diagnostics.szykmanFallbacks()
+        );
+        System.out.println();
+
+    }*/
 
 
     // Application entry point \\
@@ -739,6 +762,36 @@ public class TestCaseManager {
                 "%n============================================================%n"
         );
 
+    }
+
+    private static void diagnoseOrdinaryProbe(TestCase testCase) {
+
+        if (!testCase.getName().contains("6.F.28")
+                && !testCase.getName().contains("6.F.29")) {
+            return;
+        }
+
+        OrdinaryResolutionProbeResult result =
+                new OrdinaryResolutionProbe(
+                        testCase.getOrders()
+                ).probe();
+
+        System.out.printf(
+                "%n[ORDINARY RESOLUTION PROBE]%n%s%n"
+                        + "Complete: %b%n"
+                        + "Unresolved components: %d%n",
+                testCase.getName(),
+                result.isComplete(),
+                result.getUnresolvedComponents().size()
+        );
+
+        for (Order order : testCase.getOrders()) {
+            System.out.printf(
+                    "  %-35s %s%n",
+                    order,
+                    result.stateOf(order)
+            );
+        }
     }
 
 
