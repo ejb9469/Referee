@@ -6,14 +6,16 @@ import domain.Province;
 import util.Orders;
 
 import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * A DATC-oriented Referee policy that resolves convoy paradoxes using the
- * Szykman rule / principle.
+ * A DATC-oriented `Referee` that resolves convoy paradoxes using the
+ * Szykman rule / principle, and utilizes "ordinary adjudication" if necessary,
+ * via `Inspector` (probe-based).
  *
- * <p>At this stage, this class retains Referee's ordinary candidate collection
+ * <p>At this stage, this class retains `Referee`'s ordinary candidate collection
  * and final-selection behavior, then applies the existing narrow single-convoy
- * Szykman interpretation used for 6.F.17.P.</p>
+ * Szykman interpretation (used for 6.F.17.P).</p>
  *
  * <p>Future work belongs here rather than in {@code Referee} when it:</p>
  *
@@ -86,15 +88,17 @@ public class SzykmanReferee extends Referee {
     // Final meta-resolution selection \\
 
     /**
-     * Applies the Szykman-specific convoy-paradox policy after Referee has
+     * Applies the Szykman-specific convoy-paradox policy after `Referee` has
      * collected raw candidates.<br><br>
      *
      * A single conflicting convoy retains the narrow F17 compatibility rule.
-     * Two or more conflicting convoys are replaced by HOLD orders together,
-     * then the complete transformed position is adjudicated afresh.
+     * 2 or more conflicting convoys are replaced by HOLD orders together,
+     * then the complete transformed position is adjudicated fresh.
      */
     @Override
     protected Collection<Order> selectFinalResolution() {
+
+        finalResolutionSelections.incrementAndGet();
 
         /*
          * `Referee.judge()` restores `this.orders` to the submitted order set before
@@ -104,6 +108,9 @@ public class SzykmanReferee extends Referee {
         Collection<Order> submittedOrders = new ArrayList<>(
                 Orders.deepCopy(this.orders));
 
+        Collection<Set<Order>> resolutions =
+                this.representativeCandidateResolutions();
+
         /*
          * Most positions are not multi-convoy paradox candidates. Avoid running
          * the ordinary-resolution probe unless raw Referee candidates disagree
@@ -111,7 +118,7 @@ public class SzykmanReferee extends Referee {
          * the broad simultaneous-HOLD Szykman policy.
          */
         Map<String, Order> conflictingConvoys =
-                this.findConflictingConvoys(this.resolutions.values());
+                this.findConflictingConvoys(resolutions);
 
         if (conflictingConvoys.size() < 2) {
 
@@ -128,6 +135,8 @@ public class SzykmanReferee extends Referee {
 
         }
 
+        multiConvoyCandidates.incrementAndGet();
+
         /*
          * Multiple conflicting convoy outcomes can be either a genuine convoy
          * paradox or an apparent recursive cycle with a complete ordinary
@@ -135,10 +144,15 @@ public class SzykmanReferee extends Referee {
          * but 'Por S MAO H' supplies a decisive non-circular strength
          * constraint and the ordinary position resolves completely.
          */
-        OrdinaryResolutionProbeResult ordinaryResolution =
-                new OrdinaryResolutionProbe(
+        ordinaryResolutionProbeInvocations.incrementAndGet();
+
+        OrdinaryResolution ordinaryResolution =
+                new Inspector(
                         submittedOrders
                 ).probe();
+
+        if (ordinaryResolution.isComplete())
+            completeOrdinaryResolutionProbes.incrementAndGet();
 
         /*
          * A complete probe means ordinary adjudication determines every submitted
@@ -153,11 +167,15 @@ public class SzykmanReferee extends Referee {
                             ordinaryResolution);
 
             if (ordinaryCandidate != null) {
+                ordinaryCandidateSelections.incrementAndGet();
+
                 return new LinkedHashSet<>(
                         Orders.deepCopy(ordinaryCandidate));
             }
 
         }
+
+        szykmanFallbacks.incrementAndGet();
 
         return this.adjudicateWithConflictingConvoysHeld(
                 submittedOrders,
@@ -167,42 +185,35 @@ public class SzykmanReferee extends Referee {
 
     /**
      * Returns the raw Referee candidate whose verdicts match the complete
-     * non-speculative ordinary-resolution probe.<br><br>
+     * non-speculative ordinary-resolution probe result (`OrdinaryResolution`).<br><br>
      *
      * Referee's inherited selection may synthesize a fallback result for a
      * multi-convoy ambiguity, so use the original raw candidate here.
      */
     private Collection<Order> findProbeMatchingCandidate(
-            OrdinaryResolutionProbeResult probe
+            OrdinaryResolution ordinaryResolution
     ) {
-
-        for (Set<Order> candidate : this.resolutions.values()) {
-
-            boolean matches = true;
-
-            for (Order candidateOrder : candidate) {
-
-                Order submittedOrder =
-                        originalOrderOf(candidateOrder);
-
-                ResolutionState state =
-                        probe.stateOf(submittedOrder);
-
-                if (!state.isKnown()
-                        || state.isSuccessful()
-                        != candidateOrder.verdict) {
-                    matches = false;
-                    break;
-                }
-            }
-
-            if (matches)
-                return candidate;
-
-        }
-
+        for (CandidateResolution candidate :
+                this.candidateResolutions.values())
+            if (this.matches(
+                    ordinaryResolution,
+                    candidate,
+                    this.orders
+            ))
+                return candidate.getRepresentativeResolution();
         return null;
+    }
 
+    private boolean matches(
+            Resolution first, Resolution second,
+            Collection<Order> submittedOrders
+    ) {
+        if (!first.isComplete() || !second.isComplete())
+            return false;
+        for (Order submittedOrder : submittedOrders)
+            if (first.stateOf(submittedOrder) != second.stateOf(submittedOrder))
+                return false;
+        return true;
     }
 
 
@@ -229,7 +240,8 @@ public class SzykmanReferee extends Referee {
             if (order.orderType != OrderType.CONVOY)
                 continue;
 
-            String orderKey = orderIdentityKey(originalOrderOf(order));
+            String orderKey = Orders.keyOf(
+                    Orders.originalOf(order));
 
             if (!conflictingConvoys.containsKey(orderKey))
                 continue;
@@ -268,7 +280,9 @@ public class SzykmanReferee extends Referee {
     ) {
 
         Map<String, Order> conflictingConvoys =
-                this.findConflictingConvoys(this.resolutions.values());
+                this.findConflictingConvoys(
+                        this.representativeCandidateResolutions()
+                );
 
         if (conflictingConvoys.size() != 1)
             return selectedResolution;
@@ -312,7 +326,7 @@ public class SzykmanReferee extends Referee {
              * The convoyed army is not attacking the convoy fleet's province
              * in the F17 shape, but exclude it explicitly for safety.
              */
-            if (sameOriginalOrder(order, correspondingMove))
+            if (Orders.sameKey(order, correspondingMove))
                 continue;
 
             /*
@@ -337,21 +351,21 @@ public class SzykmanReferee extends Referee {
      * across every raw trial collected for every verdict-level candidate.<br><br>
      *
      * `resolutionKey(...)` intentionally ignores `resolved`; therefore this
-     * method uses CandidateObservation's aggregate state rather than one
-     * arbitrary first-discovered representative stored in `resolutions`.
+     * method uses CandidateResolution's aggregate state rather than one
+     * arbitrary first-discovered representative.
      */
     private boolean resolvedStateVariesAcrossCandidates(Order order) {
 
         boolean observedResolved = false;
         boolean observedUnresolved = false;
 
-        for (CandidateObservation observation :
-                this.candidateObservations.values()) {
+        for (CandidateResolution candidateResolution :
+                this.candidateResolutions.values()) {
 
-            if (observation.hasObservedResolvedState(order, true))
+            if (candidateResolution.hasObservedResolvedState(order, true))
                 observedResolved = true;
 
-            if (observation.hasObservedResolvedState(order, false))
+            if (candidateResolution.hasObservedResolvedState(order, false))
                 observedUnresolved = true;
 
             if (observedResolved && observedUnresolved)
@@ -360,6 +374,77 @@ public class SzykmanReferee extends Referee {
 
         return false;
 
+    }
+
+
+    // TODO: Remove / refactor all below
+    // Probe diagnostics \\
+
+    private static final AtomicLong finalResolutionSelections =
+            new AtomicLong();
+
+    private static final AtomicLong multiConvoyCandidates =
+            new AtomicLong();
+
+    private static final AtomicLong ordinaryResolutionProbeInvocations =
+            new AtomicLong();
+
+    private static final AtomicLong completeOrdinaryResolutionProbes =
+            new AtomicLong();
+
+    private static final AtomicLong ordinaryCandidateSelections =
+            new AtomicLong();
+
+    private static final AtomicLong szykmanFallbacks =
+            new AtomicLong();
+
+    // Probe diagnostic accessors \\
+
+    /**
+     * Clears process-wide diagnostics accumulated by all SzykmanReferee
+     * instances.
+     *
+     * <p>This is primarily intended for test harnesses that want counters for
+     * one run rather than the lifetime of the JVM.</p>
+     */
+    public static void resetProbeDiagnostics() {
+
+        finalResolutionSelections.set(0);
+        multiConvoyCandidates.set(0);
+        ordinaryResolutionProbeInvocations.set(0);
+        completeOrdinaryResolutionProbes.set(0);
+        ordinaryCandidateSelections.set(0);
+        szykmanFallbacks.set(0);
+
+    }
+
+    /**
+     * Returns an immutable snapshot of process-wide Szykman probe diagnostics.
+     */
+    public static ProbeDiagnostics getProbeDiagnostics() {
+
+        return new ProbeDiagnostics(
+                finalResolutionSelections.get(),
+                multiConvoyCandidates.get(),
+                ordinaryResolutionProbeInvocations.get(),
+                completeOrdinaryResolutionProbes.get(),
+                ordinaryCandidateSelections.get(),
+                szykmanFallbacks.get()
+        );
+
+    }
+
+    /**
+     * Aggregate counts for the probe-gated Szykman selection policy.
+     */
+    public record ProbeDiagnostics(
+            long finalResolutionSelections,
+            long multiConvoyCandidates,
+            long ordinaryResolutionProbeInvocations,
+            long completeOrdinaryResolutionProbes,
+            long ordinaryCandidateSelections,
+            long szykmanFallbacks
+    ) {
     }
 
 

@@ -7,7 +7,7 @@ import util.Orders;
 import java.util.*;
 
 /**
- * The `Judge` class holds a Collection of Orders, and contains the Adjudication & Resolution logic required to definitively process them all in sequence:
+ * The `Judge` class holds a Collection of Orders, and contains the Adjudication & Resolution logic required to process them all in 1 sequence:
  *      see `Judge.judge(...)`<br><br>
  *
  * Utilizes a duplex recursive algorithm, where `resolve(...)` handles dependency logic i.e. <i>"resolution via deduction"</i>,
@@ -15,12 +15,12 @@ import java.util.*;
  *
  * @author Evan B
  */
-public class Judge {
+public class Judge implements Adjudicator, ParadoxAware {
 
 
     // Constants \\
 
-    public static final boolean DEBUG_PRINT = true;
+    //public static final boolean DEBUG_PRINT = true;
 
 
     // The adjudication program needs to handle the following situations:
@@ -48,11 +48,14 @@ public class Judge {
     private int recursionHits = 0;
     private boolean uncertain = false;
 
+
+    // Clears at the beginning of each run of `judge()`
     private final List<ParadoxCycle> detectedParadoxCycles = new ArrayList<>();
+
     /*
      * The actual active resolveResult(...) call chain.
      *
-     * This is separate from `cycle`, whose contents are part of the legacy
+     * This is separate from `cycle`, whose contents are part of the 'legacy'
      * Kruijswijk resolution-control algorithm. This stack exists only to capture
      * the exact active dependency slice when recursion revisits an Order.
      */
@@ -80,14 +83,20 @@ public class Judge {
 
     // Public accessors \\
 
+    @Override
     public Collection<Order> getOrders() {
         return orders;
     }
 
-    public Collection<ParadoxCycle> getDetectedParadoxCycles() {
+    /**
+     * Returns recursive dependency cycles detected during the most recent
+     * {@link #judge()} invocation.
+     */
+    //public Collection<ParadoxCycle> getParadoxCycles() {
+    @Override
+    public List<ParadoxCycle> getParadoxCycles() {  // changed to List to preserve ordering
         return Collections.unmodifiableList(
-                new ArrayList<>(this.detectedParadoxCycles)
-        );
+                new ArrayList<>(this.detectedParadoxCycles));
     }
 
 
@@ -108,6 +117,7 @@ public class Judge {
      *
      * @author Evan B
      */
+    @Override
     public void judge() {
 
         if (this.judgeComponents())
@@ -162,19 +172,19 @@ public class Judge {
 
     /**
      * Resolves independent dependency components (based on `ParadoxCycle`s)
-     * through separate Judge instances.
+     * through separate `Judge` instances.
      * Each component preserves the legacy shared recursive state internally,
-     * while unrelated paradoxes cannot corrupt one another's cycle bookkeeping.<br><br>
+     * while unrelated paradoxes cannot corrupt one another's bookkeeping `cycle`.<br><br>
      *
      * The component lists contain the original Order instances,
-     * so each child Judge mutates the same orders retained by this Judge.
+     * so each child `Judge` mutates the same orders retained by this `Judge`.
      *
-     * @return True when this Judge delegated to multiple component Judges
+     * @return True when this `Judge` delegated to multiple component `Judge`s
      */
     private boolean judgeComponents() {
 
         List<List<Order>> components =
-                OrderDependencyComponents.partition(this.orders);
+                DependencyComponents.partition(this.orders);
 
         // Single Component
         if (components.size() <= 1)
@@ -190,7 +200,7 @@ public class Judge {
             componentJudge.judge();
 
             for (ParadoxCycle detectedCycle :
-                    componentJudge.getDetectedParadoxCycles()) {
+                    componentJudge.getParadoxCycles()) {
 
                 boolean alreadyKnown = false;
                 for (ParadoxCycle existingCycle :
@@ -217,7 +227,7 @@ public class Judge {
     /**
      * Compatibility wrapper.<br><br>
      *
-     * This overload exists while ResolutionContext is being introduced.
+     * This overload exists for `ResolutionContext`
      */
     protected boolean adjudicate(Order order, boolean optimistic) {
         return adjudicate(order, optimistic, this.rootContext);

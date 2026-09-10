@@ -1,7 +1,7 @@
 package adjudication;
 
 /**
- * Result of one Judge.resolve() attempt.
+ * Result of one `Judge.resolve()` attempt, used in 'ordinary adjudication'.<br><br>
  *
  * A successful value is not necessarily definitive. During recursive
  * dependency evaluation, Judge may return the caller's optimistic or
@@ -19,14 +19,14 @@ public final class ResolutionResult {
 
     /**
      * Creates a result for an order whose value has been definitively
-     * established and committed to Order.resolved / Order.verdict.
+     * established and committed to `Order.resolved` / `Order.verdict`.
      */
     public static ResolutionResult definitive(boolean successful) {
         return new ResolutionResult(successful, true);
     }
 
     /**
-     * Creates a result returned while recursive resolution remains uncertain.
+     * Creates a result returned while recursive resolution remains uncertain.<br><br>
      *
      * The value is usable by the current speculative calculation, but must not
      * be treated as a persisted final resolution.
@@ -57,4 +57,5 @@ public final class ResolutionResult {
                 + this.definitive
                 + "]";
     }
+
 }

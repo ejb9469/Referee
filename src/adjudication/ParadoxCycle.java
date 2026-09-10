@@ -24,8 +24,7 @@ public final class ParadoxCycle {
 
     public ParadoxCycle(List<Order> members) {
         this.members = Collections.unmodifiableList(
-                new ArrayList<>(members)
-        );
+                new ArrayList<>(members));
         this.containsConvoy = calculateContainsConvoy(this.members);
         this.key = calculateKey(this.members);
     }
@@ -54,21 +53,15 @@ public final class ParadoxCycle {
     }
 
     private static boolean calculateContainsConvoy(List<Order> members) {
-
         for (Order order : members) {
             if (order.orderType == OrderType.CONVOY)
                 return true;
-
             Order originalOrder = order.getSnapshot();
-
             if (originalOrder != null
-                    && originalOrder.orderType == OrderType.CONVOY) {
+                    && originalOrder.orderType == OrderType.CONVOY)
                 return true;
-            }
         }
-
         return false;
-
     }
 
     private static String calculateKey(List<Order> members) {

@@ -6,8 +6,8 @@ import domain.OrderType;
 import domain.Province;
 import parsing.DATCFileParser;
 import parsing.FileTestCaseParser;
+import testing.RefereeTestCase;
 import testing.TestCase;
-import testing.TestCaseReferee;
 import util.Constants;
 import util.OrderComparator;
 import util.Orders;
@@ -180,28 +180,28 @@ public class TestCaseManager {
 
         System.out.println("REFEREE ONE-OFF TESTING:\n");
 
-        //if (USE_SZYKMAN_REFEREE)
-            //SzykmanReferee.resetProbeDiagnostics();
+        if (USE_SZYKMAN_REFEREE)
+            SzykmanReferee.resetProbeDiagnostics();
 
-        List<TestCaseReferee> testCaseRefs = new ArrayList<>();
+        List<RefereeTestCase> refTCs = new ArrayList<>();
 
         for (TestCase testCase : this.testCases) {
-            TestCaseReferee testCaseRef =
-                    new TestCaseReferee(testCase);
+            RefereeTestCase refTC =
+                    new RefereeTestCase(testCase);
 
-            testCaseRefs.add(testCaseRef);
-            testCaseRef.eval(this.willPrint());
+            refTCs.add(refTC);
+            refTC.eval(this.willPrint());
         }
 
-        this.printTestCaseResults(testCaseRefs);
+        this.printTestCaseResults(refTCs);
 
         this.testCases.clear();
-        this.testCases.addAll(testCaseRefs);
+        this.testCases.addAll(refTCs);
 
         this.printTotals();
 
-        //if (USE_SZYKMAN_REFEREE)
-            //this.printProbeDiagnostics();
+        if (USE_SZYKMAN_REFEREE)
+            this.printProbeDiagnostics();
 
     }
 
@@ -339,7 +339,7 @@ public class TestCaseManager {
 
     }
 
-    /*private void printProbeDiagnostics() {
+    private void printProbeDiagnostics() {
 
         SzykmanReferee.ProbeDiagnostics diagnostics =
                 SzykmanReferee.getProbeDiagnostics();
@@ -355,7 +355,7 @@ public class TestCaseManager {
                 diagnostics.multiConvoyCandidates()
         );
         System.out.printf(
-                "OrdinaryResolutionProbe invocations:\t\t%d%n",
+                "Inspector invocations:\t\t%d%n",
                 diagnostics.ordinaryResolutionProbeInvocations()
         );
         System.out.printf(
@@ -372,7 +372,7 @@ public class TestCaseManager {
         );
         System.out.println();
 
-    }*/
+    }
 
 
     // Application entry point \\
@@ -485,26 +485,28 @@ public class TestCaseManager {
 
             finalOutcomes.add(finalOutcomeKey(referee.getOrders()));
 
-            for (Referee.CandidateObservation observation :
-                    referee.getCandidateObservations()) {
+            for (CandidateResolution candidateResolution :
+                    referee.getCandidateResolutions()) {
 
                 String candidateKey = outcomeKey(
-                        observation.getRepresentativeResolution()
+                        candidateResolution.getRepresentativeResolution()
                 );
 
                 CandidateStats stats = candidateStats.computeIfAbsent(
                         candidateKey,
                         ignored -> new CandidateStats(
-                                observation.getExampleInputOrder()
+                                candidateResolution.getExampleInputOrder()
                         )
                 );
 
                 stats.record(
                         seed,
-                        observation.getOccurrences(),
-                        observation.getTrialNumbers()
+                        candidateResolution.getOccurrences(),
+                        candidateResolution.getTrialNumbers()
                 );
-                stats.recordCycles(observation.getDetectedCycles());
+                stats.recordCycles(
+                        candidateResolution.getParadoxCycles()
+                );
             }
         }
 
@@ -612,11 +614,11 @@ public class TestCaseManager {
 
             referee.judge();
 
-            for (Referee.CandidateObservation observation :
-                    referee.getCandidateObservations()) {
+            for (CandidateResolution candidateResolution :
+                    referee.getCandidateResolutions()) {
 
                 Set<Order> resolution =
-                        observation.getRepresentativeResolution();
+                        candidateResolution.getRepresentativeResolution();
 
                 String key = outcomeKey(resolution);
 
@@ -625,15 +627,15 @@ public class TestCaseManager {
                                 key,
                                 ignored -> new SecondOrderCandidateStats(
                                         resolution,
-                                        observation.getExampleInputOrder()
+                                        candidateResolution.getExampleInputOrder()
                                 )
                         );
 
                 stats.record(
                         seed,
-                        observation.getOccurrences(),
-                        observation.getTrialNumbers(),
-                        observation.getDetectedCycles()
+                        candidateResolution.getOccurrences(),
+                        candidateResolution.getTrialNumbers(),
+                        candidateResolution.getParadoxCycles()
                 );
             }
         }
@@ -771,8 +773,8 @@ public class TestCaseManager {
             return;
         }
 
-        OrdinaryResolutionProbeResult result =
-                new OrdinaryResolutionProbe(
+        OrdinaryResolution result =
+                new Inspector(
                         testCase.getOrders()
                 ).probe();
 
@@ -782,7 +784,7 @@ public class TestCaseManager {
                         + "Unresolved components: %d%n",
                 testCase.getName(),
                 result.isComplete(),
-                result.getUnresolvedComponents().size()
+                result.unresolvedComponents().size()
         );
 
         for (Order order : testCase.getOrders()) {

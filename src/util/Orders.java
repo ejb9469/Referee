@@ -414,5 +414,30 @@ public abstract class Orders {
 
     }
 
+    // Stable identity helpers \\
+
+    public static Order originalOf(Order order) {
+        Order snapshot = order.getSnapshot();
+        return ((snapshot == null)
+                ? order
+                : snapshot);
+    }
+
+    public static String keyOf(Order order) {
+        Order originalOrder = Orders.originalOf(order);
+        return String.valueOf(originalOrder.owner)
+                + "\u001F" + String.valueOf(originalOrder.unitType)
+                + "\u001F" + String.valueOf(originalOrder.orderType)
+                + "\u001F" + String.valueOf(originalOrder.pos0)
+                + "\u001F" + String.valueOf(originalOrder.pos1)
+                + "\u001F" + String.valueOf(originalOrder.pos2)
+                + "\u001F" + originalOrder.dislodged;
+    }
+
+    public static boolean sameKey(Order first, Order second) {
+        return Orders.keyOf(first)
+                .equals(Orders.keyOf(second));
+    }
+
 
 }

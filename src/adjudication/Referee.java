@@ -44,17 +44,14 @@ public class Referee extends Judge {
     private final int numTrials;
     private final long shuffleSeed;
 
-    /*
-     * Key: canonical externally meaningful adjudication outcome.
-     * Value: representative deep-copied resolution for that key.
-     */
-    protected final Map<String, Set<Order>> resolutions;
+
+    private final List<ParadoxCycle> aggregateParadoxCycles;
 
     /*
-     * Additional diagnostic metadata for each raw candidate resolution.
-     * This intentionally does not influence normal candidate discovery.
+     * Key: canonical externally meaningful adjudication outcome.
+     * Value: complete candidate information for that outcome.
      */
-    protected final Map<String, CandidateObservation> candidateObservations;
+    protected final Map<String, CandidateResolution> candidateResolutions;
 
 
     // Constructors \\
@@ -89,11 +86,9 @@ public class Referee extends Judge {
         if (numTrials < 1)
             throw new IllegalArgumentException("numTrials must be at least 1");
 
-        /*
-         * TreeMap gives every discovered candidate a canonical iteration order.
-         */
-        this.resolutions = new TreeMap<>();
-        this.candidateObservations = new TreeMap<>();
+        this.aggregateParadoxCycles = new ArrayList<>();
+        // TreeMap gives every discovered candidate a canonical iteration order.
+        this.candidateResolutions = new TreeMap<>();
 
         this.numTrials = numTrials;
         this.shuffleSeed = shuffleSeed;
@@ -111,16 +106,94 @@ public class Referee extends Judge {
     @Override
     public void judge() {
 
-        this.resolutions.clear();
-        this.candidateObservations.clear();
+        this.aggregateParadoxCycles.clear();
+
+        List<Order> submittedOrders = new ArrayList<>(
+                Orders.deepCopy(this.orders));
+
+        List<List<Order>> components =
+                DependencyComponents.partition(submittedOrders);
 
         /*
-         * Begin from a stable order before shuffling. This ensures that the same
-         * input order set plus the same seed yields the same sequence of trials.
+         * Preserve the established `Referee` behavior for a position
+         * whose dependency graph is connected.
+         */
+        if (components.size() <= 1) {
+            this.judgeAmbiguousComponent(submittedOrders);
+            this.refreshParadoxCycles();
+            return;
+        }
+
+        this.candidateResolutions.clear();
+
+        Map<String, CandidateResolution> allCandidates = new TreeMap<>();
+        List<Order> finalOrders = new ArrayList<>();
+
+        int componentNumber = 0;
+        for (List<Order> component : components) {
+
+            componentNumber++;
+
+            /*
+             * Judge a private component copy once before running multitudes of trials.
+             * A cycle of `Judge`-applied "snapshot" Szykman-HOLD means this component
+             * might be order-sensitive.
+             */
+            Judge baselineJudge = new Judge(
+                    new ArrayList<>(Orders.deepCopy(component)));
+
+            baselineJudge.judge();
+
+            this.recordParadoxCycles(
+                    baselineJudge.getParadoxCycles());
+
+            if (!this.requiresTrials(baselineJudge)) {
+                finalOrders.addAll(
+                        Orders.deepCopy(baselineJudge.getOrders()));
+                continue;
+            }
+
+            Collection<Order> componentResolution =
+                    this.judgeAmbiguousComponent(component);
+
+            finalOrders.addAll(
+                    Orders.deepCopy(componentResolution));
+
+            this.copyCandidates(componentNumber, allCandidates);
+
+        }
+
+        /*
+         * Candidate keys are local to each dep. component.
+         * Prefix every stored key so 2 components with identical outcomes
+         * do not overwrite each other's diagnostics.
+         */
+        this.candidateResolutions.clear();
+        this.candidateResolutions.putAll(allCandidates);
+
+        this.orders = new ArrayList<>(
+                Orders.deepCopy(finalOrders));
+
+        this.refreshParadoxCycles();
+
+    }
+
+    /**
+     * Performs the final selection process for 1 dependency component.<br><br>
+     *
+     * `SzykmanReferee::selectFinalResolution()` intentionally executes while
+     * `this.orders` and `candidateResolutions` describe *only* this component.
+     */
+    private Collection<Order> judgeAmbiguousComponent(Collection<Order> componentOrders) {
+
+        this.candidateResolutions.clear();
+
+        /*
+         * Begin from a stable order before shuffling.
+         * This ensures the same input order set + the same seed ==> same trials seq.
          */
         List<Order> originalOrders = new ArrayList<>(
-                Orders.deepCopy(this.orders)
-        );
+                Orders.deepCopy(componentOrders));
 
         originalOrders.sort(new OrderComparator());
 
@@ -129,8 +202,7 @@ public class Referee extends Judge {
         for (int trial = 1; trial <= this.numTrials; trial++) {
 
             List<Order> ordersClone = new ArrayList<>(
-                    Orders.deepCopy(originalOrders)
-            );
+                    Orders.deepCopy(originalOrders));
 
             Collections.shuffle(ordersClone, random);
 
@@ -139,35 +211,31 @@ public class Referee extends Judge {
              * applies a Szykman convoy replacement.
              */
             List<Order> trialInputOrder = new ArrayList<>(
-                    Orders.deepCopy(ordersClone)
-            );
+                    Orders.deepCopy(ordersClone));
 
             this.orders = ordersClone;
             super.judge();
 
             Set<Order> outcome = new LinkedHashSet<>(
-                    Orders.deepCopy(this.orders)
-            );
+                    Orders.deepCopy(this.orders));
 
             String outcomeKey = resolutionKey(outcome);
 
-            this.resolutions.putIfAbsent(outcomeKey, outcome);
-
-            CandidateObservation observation =
-                    this.candidateObservations.computeIfAbsent(
+            CandidateResolution candidateResolution =
+                    this.candidateResolutions.computeIfAbsent(
                             outcomeKey,
-                            ignored -> new CandidateObservation(
+                            ignored -> new CandidateResolution(
                                     outcome,
                                     trialInputOrder,
-                                    super.getDetectedParadoxCycles()
+                                    super.getParadoxCycles()
                             )
                     );
 
-            observation.recordTrial(trial);
-            observation.recordDetectedCycles(
-                    super.getDetectedParadoxCycles()
-            );
-            observation.recordResolutionStates(outcome);
+            candidateResolution.recordTrial(trial);
+            candidateResolution.recordDetectedCycles(
+                    super.getParadoxCycles());
+            candidateResolution.recordResolutionStates(outcome);
+
         }
 
         /*
@@ -184,8 +252,101 @@ public class Referee extends Judge {
          */
         if (finalResolution != null) {
             this.orders = new ArrayList<>(
-                    Orders.deepCopy(finalResolution)
-            );
+                    Orders.deepCopy(finalResolution));
+        }
+
+        return new ArrayList<>(
+                Orders.deepCopy(this.orders));
+
+    }
+
+
+    // Component handling \\
+
+    /**
+     * Returns whether a component needs shuffled Referee trials
+     * after 1 `Judge` pass.<br><br>
+     *
+     * A recursive cycle is evidence of branch-sentitive resolution.
+     * A snapshot-backed HOLD is also evidence, because `Judge` only applies
+     * that transformation when handling a cycle containing a convoy(s).
+     */
+    private boolean requiresTrials(Judge baselineJudge) {
+
+        if (!baselineJudge.getParadoxCycles().isEmpty())
+            return true;
+
+        for (Order order : baselineJudge.getOrders())
+            if (order.getSnapshot() != null)
+                return true;
+
+        return false;
+
+    }
+
+    /**
+     * Copies candidates from the most recently-processed component
+     * by `judgeAmbiguousComponent(...)`.
+     */
+    private void copyCandidates(
+            int componentNumber,
+            Map<String, CandidateResolution> allCandidates
+    ) {
+
+        String componentPrefix = "component="
+                + componentNumber
+                + "\u001F";
+
+        for (Map.Entry<String, CandidateResolution> entry :
+                this.candidateResolutions.entrySet()) {
+            allCandidates.put(
+                    componentPrefix + entry.getKey(),
+                    new CandidateResolution(entry.getValue()));
+        }
+
+    }
+
+    /**
+     * Returns distinct recursive dependency cycles found during the most recent
+     * top-level `Referee` run.<br><br>
+     *
+     * A `Judge` returns cycles from its most recent single adjudication.
+     * `Referee` aggregates baseline and shuffled-trial cycles from every
+     * dependency component.
+     */
+    @Override
+    public List<ParadoxCycle> getParadoxCycles() {
+        return Collections.unmodifiableList(
+                new ArrayList<>(this.aggregateParadoxCycles));
+    }
+
+    private void refreshParadoxCycles() {
+
+        for (CandidateResolution candidateResolution :
+                this.candidateResolutions.values()) {
+            this.recordParadoxCycles(
+                    candidateResolution.getParadoxCycles());
+        }
+
+    }
+
+    private void recordParadoxCycles(Collection<ParadoxCycle> cycles) {
+
+        for (ParadoxCycle cycle : cycles) {
+
+            boolean alreadyKnown = false;
+
+            for (ParadoxCycle existingCycle :
+                    this.aggregateParadoxCycles) {
+                if (existingCycle.key().equals(cycle.key())) {
+                    alreadyKnown = true;
+                    break;
+                }
+            }
+
+            if (!alreadyKnown)
+                this.aggregateParadoxCycles.add(cycle);
+
         }
 
     }
@@ -212,16 +373,19 @@ public class Referee extends Judge {
      */
     protected Collection<Order> selectFinalResolution() {
 
-        if (this.resolutions.size() == 1) {
+        Collection<Set<Order>> resolutions =
+                this.representativeCandidateResolutions();
 
-            return this.resolutions.values().iterator().next();
+        if (resolutions.size() == 1) {
 
-        } else if (this.resolutions.size() > 1) {
+            return resolutions.iterator().next();
+
+        } else if (resolutions.size() > 1) {
 
             Set<Order> szykmanHolds = new HashSet<>();
             Set<Order> firstSzykmanSet = null;
 
-            for (Set<Order> resolution : this.resolutions.values()) {
+            for (Set<Order> resolution : resolutions) {
                 for (Order order : resolution) {
                     if (order.getSnapshot() != null) {
                         szykmanHolds.add(order);
@@ -247,7 +411,7 @@ public class Referee extends Judge {
                 int mostNumResolved = -1;
                 boolean tie = false;
 
-                for (Set<Order> resolution : this.resolutions.values()) {
+                for (Set<Order> resolution : resolutions) {
 
                     int numResolved = 0;
 
@@ -266,7 +430,9 @@ public class Referee extends Judge {
 
                         tie = true;
                         otherMostResolvedPerms.add(resolution);
+
                     }
+
                 }
 
                 if (tie) {
@@ -312,6 +478,7 @@ public class Referee extends Judge {
                         mostResolvedPerm = new LinkedHashSet<>(
                                 Orders.deepCopy(this.orders)
                         );
+
                     }
 
                 }
@@ -342,7 +509,9 @@ public class Referee extends Judge {
 
                     if (!foundSzykmanHoldAtPosition)
                         heuristicOrders.add(order);
+
                 }
+
             }
 
             return heuristicOrders;
@@ -356,37 +525,20 @@ public class Referee extends Judge {
     // Public diagnostics \\
 
     /**
-     * Returns deep copies of every distinct raw outcome discovered before final
-     * Referee meta-resolution selects a final result.
-     */
-    public Collection<Set<Order>> getCandidateResolutions() {
-
-        Collection<Set<Order>> copies = new ArrayList<>();
-
-        for (Set<Order> resolution : this.resolutions.values()) {
-            copies.add(new LinkedHashSet<>(
-                    Orders.deepCopy(resolution)
-            ));
-        }
-
-        return copies;
-
-    }
-
-    /**
-     * Returns one immutable observation for every raw candidate resolution.<br><br>
+     * Returns deep copies of every distinct raw Judge candidate discovered
+     * before Referee meta-resolution selects a final result.<br><br>
      *
-     * Observations include a representative outcome, occurrence count, trial
-     * numbers, a representative shuffled input order, and detected dependency
-     * cycles accumulated across matching trials.
+     * For a multi-component position, candidates describe only dependency components
+     * that required shuffled `Referee` trials.
+     * Components resolved by 1 baseline `Judge` pass do *not* produce `CandidateResolution` entries.
      */
-    public Collection<CandidateObservation> getCandidateObservations() {
+    public Collection<CandidateResolution> getCandidateResolutions() {
 
-        Collection<CandidateObservation> copies = new ArrayList<>();
+        Collection<CandidateResolution> copies = new ArrayList<>();
 
-        for (CandidateObservation observation :
-                this.candidateObservations.values()) {
-            copies.add(new CandidateObservation(observation));
+        for (CandidateResolution candidateResolution :
+                this.candidateResolutions.values()) {
+            copies.add(new CandidateResolution(candidateResolution));
         }
 
         return copies;
@@ -395,6 +547,25 @@ public class Referee extends Judge {
 
 
     // Final meta-resolution helpers \\
+
+    /**
+     * Returns deep copies of the representative order collection from every
+     * distinct raw candidate resolution.
+     */
+    protected Collection<Set<Order>> representativeCandidateResolutions() {
+
+        Collection<Set<Order>> resolutions = new ArrayList<>();
+
+        for (CandidateResolution candidateResolution :
+                this.candidateResolutions.values()) {
+            resolutions.add(
+                    candidateResolution.getRepresentativeResolution()
+            );
+        }
+
+        return resolutions;
+
+    }
 
     /**
      * Deterministically selects the most successful candidate from candidates
@@ -471,8 +642,8 @@ public class Referee extends Judge {
 
         for (Order order : representativeResolution) {
 
-            Order originalOrder = originalOrderOf(order);
-            String originalKey = orderIdentityKey(originalOrder);
+            Order originalOrder = Orders.originalOf(order);
+            String originalKey = Orders.keyOf(originalOrder);
 
             if (conflictingConvoys.containsKey(originalKey))
                 continue;
@@ -537,16 +708,14 @@ public class Referee extends Judge {
                 }
 
                 if (differsAcrossResolutions) {
-
                     Order originalConvoy = new Order(
-                            originalOrderOf(convoyOrder)
-                    );
-
+                            Orders.originalOf(convoyOrder));
                     conflictingConvoys.putIfAbsent(
-                            orderIdentityKey(originalConvoy),
+                            Orders.keyOf(originalConvoy),
                             originalConvoy
                     );
                 }
+
             }
         }
 
@@ -563,7 +732,7 @@ public class Referee extends Judge {
 
         for (Order order : resolution) {
             entries.add(
-                    orderIdentityKey(order)
+                    Orders.keyOf(order)
                             + "\u001Fverdict=" + order.verdict
                             + "\u001Fsnapshot=" + snapshotIdentityKey(order)
             );
@@ -574,18 +743,6 @@ public class Referee extends Judge {
 
     }
 
-    protected static String orderIdentityKey(Order order) {
-
-        return String.valueOf(order.owner)
-                + "\u001F" + String.valueOf(order.unitType)
-                + "\u001F" + String.valueOf(order.orderType)
-                + "\u001F" + String.valueOf(order.pos0)
-                + "\u001F" + String.valueOf(order.pos1)
-                + "\u001F" + String.valueOf(order.pos2)
-                + "\u001F" + order.dislodged;
-
-    }
-
     private static String snapshotIdentityKey(Order order) {
 
         Order snapshot = order.getSnapshot();
@@ -593,23 +750,8 @@ public class Referee extends Judge {
         if (snapshot == null)
             return "<none>";
 
-        return orderIdentityKey(snapshot);
+        return Orders.keyOf(snapshot);
 
-    }
-
-    protected static Order originalOrderOf(Order order) {
-
-        Order snapshot = order.getSnapshot();
-
-        if (snapshot != null)
-            return snapshot;
-
-        return order;
-
-    }
-
-    protected static boolean sameOriginalOrder(Order first, Order second) {
-        return originalOrderOf(first).equals(originalOrderOf(second));
     }
 
     private static boolean sameAdjudicationOutcome(Order first, Order second) {
@@ -627,7 +769,7 @@ public class Referee extends Judge {
     ) {
 
         for (Order order : resolution) {
-            if (sameOriginalOrder(candidate, order))
+            if (Orders.sameKey(candidate, order))
                 return order;
         }
 
@@ -642,197 +784,11 @@ public class Referee extends Judge {
         Collection<Order> convoyOrders = new ArrayList<>();
 
         for (Order order : resolution) {
-            if (originalOrderOf(order).orderType == OrderType.CONVOY)
+            if (Orders.originalOf(order).orderType == OrderType.CONVOY)
                 convoyOrders.add(order);
         }
 
         return convoyOrders;
-
-    }
-
-
-    // Nested diagnostic type(s) \\
-
-    /**
-     * Diagnostic information for one distinct raw Judge outcome observed during
-     * this Referee instance's shuffled trials.
-     */
-    public static final class CandidateObservation {
-
-        private final Set<Order> representativeResolution;
-        private final List<Order> exampleInputOrder;
-        private final List<Integer> trialNumbers;
-        private final List<ParadoxCycle> detectedCycles;
-
-        /*
-         * `resolutionKey(...)` deliberately excludes `Order.resolved`, so
-         * trials with the same external verdicts can have distinct recursive
-         * bookkeeping. Retain all observed resolved states rather than making
-         * the first representative outcome decide later meta-resolution.
-         */
-        private final Map<String, ResolutionStateRange> resolutionStates;
-
-        private int occurrences;
-
-        private CandidateObservation(
-                Collection<Order> representativeResolution,
-                Collection<Order> exampleInputOrder,
-                Collection<ParadoxCycle> detectedCycles
-        ) {
-
-            this.representativeResolution = new LinkedHashSet<>(
-                    Orders.deepCopy(representativeResolution)
-            );
-
-            this.exampleInputOrder = new ArrayList<>(
-                    Orders.deepCopy(exampleInputOrder)
-            );
-
-            this.trialNumbers = new ArrayList<>();
-            this.detectedCycles = new ArrayList<>(detectedCycles);
-
-            this.resolutionStates = new LinkedHashMap<>();
-            this.recordResolutionStates(representativeResolution);
-
-            this.occurrences = 0;
-
-        }
-
-        private CandidateObservation(CandidateObservation other) {
-
-            this.representativeResolution = new LinkedHashSet<>(
-                    Orders.deepCopy(other.representativeResolution)
-            );
-
-            this.exampleInputOrder = new ArrayList<>(
-                    Orders.deepCopy(other.exampleInputOrder)
-            );
-
-            this.trialNumbers = new ArrayList<>(other.trialNumbers);
-            this.detectedCycles = new ArrayList<>(other.detectedCycles);
-
-            this.resolutionStates = new LinkedHashMap<>();
-
-            for (Map.Entry<String, ResolutionStateRange> entry :
-                    other.resolutionStates.entrySet()) {
-                this.resolutionStates.put(
-                        entry.getKey(),
-                        new ResolutionStateRange(entry.getValue())
-                );
-            }
-
-            this.occurrences = other.occurrences;
-
-        }
-
-        private void recordTrial(int trial) {
-            this.occurrences++;
-            this.trialNumbers.add(trial);
-        }
-
-        private void recordDetectedCycles(
-                Collection<ParadoxCycle> cycles
-        ) {
-            for (ParadoxCycle cycle : cycles) {
-                boolean alreadyKnown = false;
-                for (ParadoxCycle existingCycle : this.detectedCycles) {
-                    if (existingCycle.key().equals(cycle.key())) {
-                        alreadyKnown = true;
-                        break;
-                    }
-                }
-                if (!alreadyKnown)
-                    this.detectedCycles.add(cycle);
-            }
-        }
-
-        /**
-         * Records all resolver bookkeeping states observed for a raw,
-         * verdict-level candidate. Snapshot-backed Szykman holds use their
-         * original convoy identity so they remain associated with the
-         * submitted convoy order.
-         */
-        private void recordResolutionStates(Collection<Order> outcome) {
-            for (Order order : outcome) {
-                String key = orderIdentityKey(originalOrderOf(order));
-                this.resolutionStates.computeIfAbsent(
-                        key,
-                        ignored -> new ResolutionStateRange()
-                ).observe(order.resolved);
-            }
-        }
-
-        protected boolean hasObservedResolvedState(
-                Order order,
-                boolean resolved
-        ) {
-            ResolutionStateRange states = this.resolutionStates.get(
-                    orderIdentityKey(originalOrderOf(order))
-            );
-            return states != null && states.hasObserved(resolved);
-        }
-
-        public int getOccurrences() {
-            return this.occurrences;
-        }
-
-        public List<Integer> getTrialNumbers() {
-            return Collections.unmodifiableList(
-                    new ArrayList<>(this.trialNumbers)
-            );
-        }
-
-        public Set<Order> getRepresentativeResolution() {
-            return new LinkedHashSet<>(
-                    Orders.deepCopy(this.representativeResolution)
-            );
-        }
-
-        public List<Order> getExampleInputOrder() {
-            return new ArrayList<>(
-                    Orders.deepCopy(this.exampleInputOrder)
-            );
-        }
-
-        public List<ParadoxCycle> getDetectedCycles() {
-            return Collections.unmodifiableList(
-                    new ArrayList<>(this.detectedCycles)
-            );
-        }
-
-        /**
-         * Range of recursive bookkeeping states observed for one submitted
-         * order under the same external verdict-level candidate key.
-         */
-        private static final class ResolutionStateRange {
-
-            private boolean observedResolved;
-            private boolean observedUnresolved;
-
-            private ResolutionStateRange() {
-                this.observedResolved = false;
-                this.observedUnresolved = false;
-            }
-
-            private ResolutionStateRange(ResolutionStateRange other) {
-                this.observedResolved = other.observedResolved;
-                this.observedUnresolved = other.observedUnresolved;
-            }
-
-            private void observe(boolean resolved) {
-                if (resolved)
-                    this.observedResolved = true;
-                else
-                    this.observedUnresolved = true;
-            }
-
-            private boolean hasObserved(boolean resolved) {
-                return resolved
-                        ? this.observedResolved
-                        : this.observedUnresolved;
-            }
-
-        }
 
     }
 

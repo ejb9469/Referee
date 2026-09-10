@@ -1,7 +1,6 @@
 package testing;
 
 import adjudication.Judge;
-import adjudication.Referee;
 import adjudication.SzykmanReferee;
 import domain.Order;
 import util.Orders;
@@ -10,18 +9,18 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
-public class TestCaseReferee extends TestCase {
+public class RefereeTestCase extends TestCase {
 
 
-    public TestCaseReferee(String name, Order... orders) {
+    public RefereeTestCase(String name, Order... orders) {
         super(name, orders);
     }
 
-    public TestCaseReferee(String name, List<Order> orders) {
+    public RefereeTestCase(String name, List<Order> orders) {
         super(name, orders);
     }
 
-    public TestCaseReferee(TestCase testCase) {
+    public RefereeTestCase(TestCase testCase) {
         super(testCase);
     }
 

@@ -5,14 +5,13 @@ import domain.Order;
 import domain.OrderType;
 import domain.Province;
 import util.Orders;
+import util.Convoys;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Performs (!!)conservative(!!) ordinary adjudication WITHOUT speculative recursion
@@ -22,28 +21,26 @@ import java.util.Set;
  * be established from already-known outcomes. A dependency whose result is
  * unknown keeps its consumer UNKNOWN; it is never guessed optimistically or
  * pessimistically.</p>
- *
- * <p>This class is (currently) diagnostic-only. It must not mutate the submitted
- * orders and must not be used by SzykmanReferee until its output has been
- * validated against the paradox fixtures.</p>
  */
-public final class OrdinaryResolutionProbe {
+public class Inspector implements Probe {
 
 
     private final List<Order> orders;
     private final Map<String, ResolutionState> states;
 
 
-    public OrdinaryResolutionProbe(Collection<Order> submittedOrders) {
+    public Inspector(Collection<Order> submittedOrders) {
         this.orders = new ArrayList<>(submittedOrders);
         this.states = new LinkedHashMap<>();
-        for (Order order : this.orders) {
-            this.states.put(orderKey(order), ResolutionState.UNKNOWN);
-        }
+        for (Order order : this.orders)
+            this.states.put(
+                    Orders.keyOf(order),
+                    ResolutionState.UNKNOWN);
     }
 
 
-    public OrdinaryResolutionProbeResult probe() {
+    @Override
+    public OrdinaryResolution probe() {
 
         boolean changed;
 
@@ -60,7 +57,7 @@ public final class OrdinaryResolutionProbe {
                 if (!state.isKnown())
                     continue;
 
-                this.states.put(orderKey(order), state);
+                this.states.put(Orders.keyOf(order), state);
                 changed = true;
 
             }
@@ -69,10 +66,9 @@ public final class OrdinaryResolutionProbe {
         List<List<Order>> unresolvedComponents =
                 this.findUnresolvedComponents();
 
-        return new OrdinaryResolutionProbeResult(
+        return new OrdinaryResolution(
                 this.states,
-                unresolvedComponents
-        );
+                unresolvedComponents);
 
     }
 
@@ -80,7 +76,7 @@ public final class OrdinaryResolutionProbe {
     /**
      * Evaluates one order from currently known facts only.
      */
-    private ResolutionState evaluate(Order order) {
+    protected ResolutionState evaluate(Order order) {
 
         if (!Orders.orderIsValid(order))
             return ResolutionState.FAILURE;
@@ -102,15 +98,13 @@ public final class OrdinaryResolutionProbe {
      * <p>If an assailant remains unknown, the hold remains unknown rather than
      * being guessed successful.</p>
      */
-    private ResolutionState evaluateHold(Order hold) {
+    protected ResolutionState evaluateHold(Order hold) {
 
         boolean hasUnknownAssailant = false;
 
-        for (Order assailant :
-                Orders.locateUnitsMovingToPosition(
-                        hold.pos0,
-                        this.orders
-                )) {
+        for (Order assailant : Orders.locateUnitsMovingToPosition(
+                                hold.pos0, this.orders)
+        ) {
 
             if (assailant == hold)
                 continue;
@@ -122,6 +116,7 @@ public final class OrdinaryResolutionProbe {
 
             if (assailantState == ResolutionState.UNKNOWN)
                 hasUnknownAssailant = true;
+
         }
 
         return hasUnknownAssailant
@@ -139,7 +134,7 @@ public final class OrdinaryResolutionProbe {
      * an assailant is UNKNOWN. Later iterations can settle it after tactical
      * moves have been resolved.</p>
      */
-    private ResolutionState evaluateConvoy(Order convoy) {
+    protected ResolutionState evaluateConvoy(Order convoy) {
 
         if (Orders.locateCorresponding(convoy, this.orders) == null)
             return ResolutionState.FAILURE;
@@ -177,7 +172,7 @@ public final class OrdinaryResolutionProbe {
      * <p>A friendly move cannot cut support. A move directed at the province
      * that the support itself attacks also cannot cut that support.</p>
      */
-    private ResolutionState evaluateSupport(Order support) {
+    protected ResolutionState evaluateSupport(Order support) {
 
         if (Orders.locateCorresponding(support, this.orders) == null)
             return ResolutionState.FAILURE;
@@ -199,7 +194,7 @@ public final class OrdinaryResolutionProbe {
                     && Province.equalsIgnoreCoast(
                     support.pos2,
                     move.pos0
-            )) { continue;}
+            )) { continue; }
 
             /*
              * A move cuts support when it can attack the supporter's province.
@@ -237,7 +232,7 @@ public final class OrdinaryResolutionProbe {
      * Complex head-to-head, convoy-swap, and unresolved-path situations remain
      * UNKNOWN for now.</p>
      */
-    private ResolutionState evaluateMove(Order move) {
+    protected ResolutionState evaluateMove(Order move) {
 
         if (!isOrdinaryPathKnown(move))
             return ResolutionState.UNKNOWN;
@@ -273,11 +268,9 @@ public final class OrdinaryResolutionProbe {
 
         boolean defeatsEveryCompetitor = true;
 
-        for (Order competitor :
-                Orders.locateUnitsMovingToPosition(
-                        move.pos1,
-                        this.orders
-                )) {
+        for (Order competitor : Orders.locateUnitsMovingToPosition(
+                                    move.pos1, this.orders)
+        ) {
 
             if (competitor == move
                     || competitor.orderType != OrderType.MOVE) {
@@ -292,13 +285,14 @@ public final class OrdinaryResolutionProbe {
 
             /*
              * A competitor can prevent this move unless this move's minimum
-             * attack is strictly greater than that competitor's maximum prevent
+             * attack is greater than that competitor's maximum prevent
              * strength.
              */
             if (attack.minimum() <= competitorPrevent.maximum()) {
                 defeatsEveryCompetitor = false;
                 break;
             }
+
         }
 
         if (attack.alwaysBeats(defense) && defeatsEveryCompetitor)
@@ -327,6 +321,8 @@ public final class OrdinaryResolutionProbe {
         if (move.orderType != OrderType.MOVE)
             return false;
 
+        boolean hasMatchingConvoy = false;
+
         for (Order convoy : this.orders) {
 
             if (convoy.orderType != OrderType.CONVOY)
@@ -335,65 +331,55 @@ public final class OrdinaryResolutionProbe {
             if (!sameConvoySpecification(convoy, move))
                 continue;
 
+            hasMatchingConvoy = true;
+
             if (stateOf(convoy) != ResolutionState.SUCCESS)
                 return false;
         }
 
-        return true;
+        return hasMatchingConvoy;
 
     }
 
 
     private StrengthRange attackStrengthRange(Order move) {
 
-        SupportRange supports = moveSupportRange(
+        StrengthRange supports = moveSupportRange(
                 move,
-                null
-        );
+                null);
 
         Order destinationOccupant = Orders.locateUnitAtPosition(
                 move.pos1,
-                this.orders
-        );
+                this.orders);
 
-        if (destinationOccupant == null) {
-            return new StrengthRange(
-                    1 + supports.minimum(),
-                    1 + supports.maximum()
-            );
-        }
+        StrengthRange strengthRange = new StrengthRange(
+                1 + supports.minimum(),
+                1 + supports.maximum());
+
+        if (destinationOccupant == null)
+            return strengthRange;
 
         /*
          * A moving destination occupant creates a dependency on whether the unit
          * vacates. Do not guess that fact in this first interval-based probe.
          */
         if (destinationOccupant.orderType == OrderType.MOVE) {
-
             ResolutionState occupantState = stateOf(destinationOccupant);
-
             if (occupantState == ResolutionState.UNKNOWN)
                 return null;
-
-            if (occupantState == ResolutionState.SUCCESS) {
-                return new StrengthRange(
-                        1 + supports.minimum(),
-                        1 + supports.maximum()
-                );
-            }
-
+            if (occupantState == ResolutionState.SUCCESS)
+                return strengthRange;
             if (destinationOccupant.owner == move.owner)
                 return new StrengthRange(0, 0);
         }
 
-        SupportRange foreignSupports = moveSupportRange(
+        StrengthRange foreignSupports = moveSupportRange(
                 move,
-                destinationOccupant.owner
-        );
+                destinationOccupant.owner);
 
         return new StrengthRange(
                 1 + foreignSupports.minimum(),
-                1 + foreignSupports.maximum()
-        );
+                1 + foreignSupports.maximum());
 
     }
 
@@ -414,14 +400,14 @@ public final class OrdinaryResolutionProbe {
 
             if (headToHeadState == ResolutionState.SUCCESS)
                 return new StrengthRange(0, 0);
+
         }
 
-        SupportRange supports = moveSupportRange(move, null);
+        StrengthRange supports = moveSupportRange(move, null);
 
         return new StrengthRange(
                 1 + supports.minimum(),
-                1 + supports.maximum()
-        );
+                1 + supports.maximum());
 
     }
 
@@ -430,8 +416,7 @@ public final class OrdinaryResolutionProbe {
 
         Order occupant = Orders.locateUnitAtPosition(
                 destination,
-                this.orders
-        );
+                this.orders);
 
         if (occupant == null)
             return new StrengthRange(0, 0);
@@ -445,14 +430,14 @@ public final class OrdinaryResolutionProbe {
 
             if (state == ResolutionState.SUCCESS)
                 return new StrengthRange(0, 0);
+
         }
 
-        SupportRange supports = holdSupportRange(occupant);
+        StrengthRange supports = holdSupportRange(occupant);
 
         return new StrengthRange(
                 1 + supports.minimum(),
-                1 + supports.maximum()
-        );
+                1 + supports.maximum());
 
     }
 
@@ -464,7 +449,7 @@ public final class OrdinaryResolutionProbe {
      * @param forbiddenOwner when non-null, supports from this power are excluded;
      *                       this matches `Judge::tallySuccessfulSupportsForeign(...)`
      */
-    private SupportRange moveSupportRange(
+    private StrengthRange moveSupportRange(
             Order move,
             Nation forbiddenOwner
     ) {
@@ -495,14 +480,15 @@ public final class OrdinaryResolutionProbe {
             } else if (supportState == ResolutionState.UNKNOWN) {
                 maximum++;
             }
+
         }
 
-        return new SupportRange(minimum, maximum);
+        return new StrengthRange(minimum, maximum);
 
     }
 
 
-    private SupportRange holdSupportRange(Order occupant) {
+    private StrengthRange holdSupportRange(Order occupant) {
 
         int minimum = 0;
         int maximum = 0;
@@ -525,26 +511,10 @@ public final class OrdinaryResolutionProbe {
             } else if (supportState == ResolutionState.UNKNOWN) {
                 maximum++;
             }
+
         }
 
-        return new SupportRange(minimum, maximum);
-
-    }
-
-
-    /**
-     * Bounds the number of valid supports of one kind.
-     */
-    private record SupportRange(int minimum, int maximum) {
-
-        private SupportRange {
-            if (minimum < 0 || maximum < minimum) {
-                throw new IllegalArgumentException(
-                        "Invalid support range: "
-                                + minimum + ".." + maximum
-                );
-            }
-        }
+        return new StrengthRange(minimum, maximum);
 
     }
 
@@ -554,7 +524,7 @@ public final class OrdinaryResolutionProbe {
         List<List<Order>> unresolvedComponents = new ArrayList<>();
 
         for (List<Order> component :
-                OrderDependencyComponents.partition(this.orders)) {
+                DependencyComponents.partition(this.orders)) {
 
             List<Order> unresolved = new ArrayList<>();
 
@@ -565,6 +535,7 @@ public final class OrdinaryResolutionProbe {
 
             if (!unresolved.isEmpty())
                 unresolvedComponents.add(unresolved);
+
         }
 
         return unresolvedComponents;
@@ -574,9 +545,8 @@ public final class OrdinaryResolutionProbe {
 
     private ResolutionState stateOf(Order order) {
         return this.states.getOrDefault(
-                orderKey(order),
-                ResolutionState.UNKNOWN
-        );
+                Orders.keyOf(order),
+                ResolutionState.UNKNOWN);
     }
 
     private static boolean sameConvoySpecification(
@@ -585,21 +555,6 @@ public final class OrdinaryResolutionProbe {
     ) {
         return Province.equalsIgnoreCoast(convoy.pos1, move.pos0)
                 && Province.equalsIgnoreCoast(convoy.pos2, move.pos1);
-    }
-
-    /**
-     * Stable identity for the submitted order. Probe state deliberately does
-     * not use Order equality because order instances may later carry mutable
-     * adjudication metadata in other contexts.
-     */
-    public static String orderKey(Order order) {
-        return String.valueOf(order.owner)
-                + "\u001F" + String.valueOf(order.unitType)
-                + "\u001F" + String.valueOf(order.orderType)
-                + "\u001F" + String.valueOf(order.pos0)
-                + "\u001F" + String.valueOf(order.pos1)
-                + "\u001F" + String.valueOf(order.pos2)
-                + "\u001F" + order.dislodged;
     }
 
 

@@ -28,15 +28,15 @@ import java.util.Set;
  * effect. Keeping extra orders in one component is safe; incorrectly
  * separating dependent orders is not.</p>
  */
-public abstract class OrderDependencyComponents {
+public abstract class DependencyComponents {
 
 
     /**
      * Returns conservative dependency components in the input collection's
      * iteration order.<br><br>
      *
-     * Order identity, rather than Order.equals(...), is used for graph
-     * membership because adjudication metadata is mutable.
+     * Order identity, rather than `Order.equals(...)`, is used for graph
+     * membership b/c adjudication metadata is mutable.
      */
     public static List<List<Order>> partition(
             Collection<Order> orders
@@ -120,11 +120,11 @@ public abstract class OrderDependencyComponents {
     // Dependency graph helpers \\
 
     /**
-     * Returns true when two orders may affect one another's adjudication.
+     * Returns true when two orders may affect one another's adjudication.<br><br>
      *
      * This includes direct board conflicts plus the correspondence relations
-     * used by Orders.locateCorresponding(...), Orders.locateHeadToHead(...),
-     * and Convoys.drawConvoyPath(...).
+     * used by `Orders.locateCorresponding(...)`, `Orders.locateHeadToHead(...)`,
+     * and `Convoys.drawConvoyPath(...)`.
      */
     private static boolean mayDepend(Order first, Order second) {
 
@@ -188,7 +188,7 @@ public abstract class OrderDependencyComponents {
     }
 
     /**
-     * Returns whether an order references a province as an order target.
+     * Returns whether an order references a given Province as an order target.<br><br>
      *
      * `pos0` is deliberately excluded: it is the issuing unit's own current
      * location and is compared separately by mayDepend(...).

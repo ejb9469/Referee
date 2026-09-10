@@ -19,10 +19,10 @@ These test cases include:
 
 ## Top-level classes
 
-- `Judge.java` — resolves a set of orders
-- `Referee.java` (extends Judge) — runs multiple shuffled adjudications and selects a final result when raw results differ
-- `SzykmanReferee.java` (extends Referee) - special Referee used for convoy paradoxes
-- `OrdinaryResolutionProbe.java` - performs "ordinal adjudication" (based on assumptions alone) to aid in paradox decisions
+- `Judge.java` — resolves an *ordered set* of Diplomacy orders
+- `Referee.java` (extends Judge) — runs multiple shuffled adjudications and selects a result when raw results differ
+- `SzykmanReferee.java` (extends Referee) - applies Szykman convoy-paradox rules where conflicting convoy outcomes require
+- `Inspector.java` - determines whether a potential convoy-paradox has a complete "ordinary resolution", without guesses
 - `TestCaseManager.java` — loads and runs DATC test cases
 
 ---
