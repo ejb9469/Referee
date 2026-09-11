@@ -12,6 +12,7 @@ import java.util.Collection;
 public interface Adjudicator {
 
     void judge();
+
     Collection<Order> getOrders();
 
 }

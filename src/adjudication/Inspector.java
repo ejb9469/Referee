@@ -17,10 +17,10 @@ import java.util.Map;
  * Performs (!!)conservative(!!) ordinary adjudication WITHOUT speculative recursion
  * and WITHOUT applying the Szykman rule.
  *
- * <p>The probe repeatedly commits only SUCCESS or FAILURE outcomes that can
+ * <p>`Inspector` repeatedly commits only SUCCESS or FAILURE outcomes that can
  * be established from already-known outcomes. A dependency whose result is
  * unknown keeps its consumer UNKNOWN; it is never guessed optimistically or
- * pessimistically.</p>
+ * pessimistically (like in `Judge`).</p>
  */
 public class Inspector implements Probe {
 

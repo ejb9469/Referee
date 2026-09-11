@@ -4,7 +4,7 @@ import domain.Order;
 
 
 /**
- * Describes the resolution state assigned to submitted Orders.<br>
+ * 'Resolution' assigned to submitted Orders.<br>
  *
  * A resolution may be 'complete', assigning SUCCESS or FAILURE to every order,
  * or incomplete, leaving some orders UNKNOWN.
